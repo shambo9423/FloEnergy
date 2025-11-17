@@ -9,6 +9,10 @@ Key behaviors:
 - Inserts Accounts first (partial success DML), then Contacts and maps AccountId using insert SaveResults
 - Logs API call details to `API_Log__c` and exceptions to `Exception_Log__c`
 
+## Data Model
+
+![alt text](<image (4).png>)
+
 ## Important files
 
 - `force-app/main/default/classes/CustomerDetailsQueuable.cls` — Queueable implementation that performs the callout, parses payload, and creates Account + Contact records.
