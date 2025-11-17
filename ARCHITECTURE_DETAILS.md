@@ -9,7 +9,7 @@
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              RandomUserBatch (Global Batch)                 │
+│              CustomerDetailsQueuable (Global Batch)                 │
 │  implements Database.Batchable<Object>                      │
 │  implements Database.AllowsCallouts                         │
 └─────────────────────────────────────────────────────────────┘
@@ -21,7 +21,7 @@
     └─────────┘          └─────────┘         └─────────┘
         │                    │                    │
         │ Calls API          │ Process Data       │ Finalize
-        │ Fetch 10 users     │ Create Records     │ Logging
+        │ Fetch  users     │ Create Records     │ Logging
         │                    │ Link Objects       │
         ▼                    ▼                    ▼
     ┌──────────────────────────────────────────────────────┐
@@ -153,7 +153,7 @@ Field              Type       Value
 ──────────────────────────────────────
 Timestamp__c       DateTime   System.now()
 API_Endpoint__c    String     API endpoint URL
-Request_Params__c  String     Request parameters
+Request_Body__c  String     Request Body
 Response_Body__c   String     Full API response
 Status__c          String     'Success' or 'Error'
 Error_Message__c   String     Error details (if any)
@@ -253,7 +253,7 @@ executeBatch(batch, 10);
 ### Scenario 1: Manual Execution from Execute Anonymous
 ```apex
 // User executes
-Id jobId = RandomUserBatchUtil.executeBatch();
+Id jobId = CustomerDetailsQueuable.executeBatch();
 
 // Results
 ✓ 10 Contacts created
@@ -266,7 +266,7 @@ Id jobId = RandomUserBatchUtil.executeBatch();
 ### Scenario 2: Scheduled Daily Execution
 ```apex
 // Setup
-System.schedule('Daily Random Users', '0 0 2 * * ?', new RandomUserBatchSchedulable());
+System.schedule('Daily Random Users', '0 0 2 * * ?', new CustomerDetailsQueuable());
 
 // Daily execution at 2 AM
 // Creates ~3,650 records per year (10 × 365)
