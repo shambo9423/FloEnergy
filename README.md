@@ -1,4 +1,4 @@
-# Random User Integration (Queueable)
+# Get User Details Integration (Queueable)
 
 ## Overview
 This repository implements an asynchronous integration that fetches user details from a Random User-style API and creates corresponding Salesforce records (Account + Contact). The actual implementation uses a Queueable (`CustomerDetailsQueuable`) rather than a Batchable class. The controller and tests live under `force-app/main/default/classes` and the LWC table controller is in `force-app/main/default/lwc`.
