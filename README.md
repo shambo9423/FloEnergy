@@ -57,3 +57,7 @@ Note: Some tests rely on custom metadata being present in the target org. If tes
 - The code uses partial-success DML (`Database.insert(list, false)`) to tolerate individual record failures and log them for inspection.
 - Consider adding deduplication, configurable field mappings, and a robust retry mechanism for transient API failures.
 
+
+## Demo
+
+https://www.loom.com/share/bd3e64f089be4765bb7ffeca31975a81
