@@ -1,4 +1,4 @@
-# Random User Batch - Architecture & Implementation Details
+# Architecture & Implementation Details
 
 ## System Architecture
 
@@ -31,89 +31,64 @@
 
 ## Detailed Execution Flow
 
-### Phase 1: START METHOD
+### API Callouts and UserDetailsService
 ```
-1. Creates HttpRequest to Random User API
-2. Sets endpoint: https://randomuser.me/api?results=10
-3. Sends GET request
-4. Validates HTTP status (200)
-5. Logs API response to API_Log__c
-6. Parses JSON response
-7. Returns List<Object> of users for processing
+1. Creates HttpRequest to the configured external API (example endpoint used during development: https://randomuser.me/api/?nat=us&inc=name,email,phone&noinfo)
+2. Sends GET request and validates HTTP status (expect 200)
+3. Logs API response to `API_Log__c` using `APILogger` (response body stored for audit)
+4. Parses JSON response and returns structured DTOs for downstream processing
 ```
 
-### Phase 2: EXECUTE METHOD (for each batch of records)
+### Subscription flow (Opportunity-driven)
 ```
-For each user in scope:
-  1. Parse user object
-  2. Extract fields:
-     - name (first, last)
-     - location (street, city, state, country, postcode)
-     - email
-     - phone
-     - cell
-  
-  3. Create Contact record
-     - Map all personal/contact info
-     - Set mailing address from location
-  
-  4. Create Account record
-     - Set Name = FirstName + LastName + " Household"
-     - Set billing address from location
-  
-  5. Add to insert lists
-
-After loop:
-  1. Insert Accounts first (DML 1)
-  2. Query created Accounts for ID mapping
-  3. Link Contacts to Accounts by name matching
-  4. Insert Contacts with AccountId (DML 2)
-  5. Handle DML errors gracefully
-  6. Log any exceptions to Exception_Log__c
+- Trigger: `OpportunityTrigger` (after update) routes to `OpportunitySubscriptionHandler`
+- When Opportunity Stage = "Closed Won" and `Add_subscriptions__c` indicates >0, the handler:
+   - Builds N `Subscription__c` records (Sequence__c = 1..N)
+   - Sets `Opportunity__c`, `Opportunity_Name__c`, `Start_Date__c` (Opportunity CloseDate), `End_Date__c` = CloseDate + 12 months, `Amount__c`, `Status__c`
+   - Uses `Database.insert(subscriptions, false)` to allow partial success
+   - Collects per-Opportunity errors from `SaveResult` and creates `Exception_Log__c` records in a batch (no logging inside loops)
+   - Does NOT add `addError()` for DML failures (to avoid rolling back successful inserts)
+   - Account is derived via `Opportunity__r.AccountId` where needed (no Account__c on Subscription)
 ```
 
-### Phase 3: FINISH METHOD
+### Finish / cleanup
 ```
-1. Log batch completion
-2. Record batch job ID
-3. Handle any final cleanup
-```
-
-## Class Hierarchy & Dependencies
-
-```
-RandomUserBatch
-├── Implements: Database.Batchable<Object>
-├── Implements: Database.AllowsCallouts
-├── Methods
-│   ├── start() → calls Http.send()
-│   ├── execute() → uses Database.insert()
-│   └── finish() → logs completion
-└── Dependencies
-    ├── APILogger (for API logging)
-    ├── ExceptionLogger (for error logging)
-    └── Contact, Account (Salesforce objects)
-
-RandomUserBatchUtil
-├── Public static methods
-├── executeBatch() → calls Database.executeBatch()
-├── executeBatch(Integer) → overload with batch size
-└── Dependencies
-    └── RandomUserBatch
-
-RandomUserBatchTest
-├── @isTest private class
-├── MockHttpResponse implements HttpCalloutMock
-├── Test methods
-│   ├── testRandomUserBatchExecution()
-│   └── testRandomUserBatchWithMultipleUsers()
-└── Dependencies
-    └── RandomUserBatch
+1. Log completion and any summary metrics as needed (via `APILogger` / `ExceptionLogger`)
+2. Surface errors in `Exception_Log__c` for operators to review
 ```
 
-## Data Model
+## Class Hierarchy & Dependencies (summary)
 
-### Contact Object (created by batch)
+Key Apex classes and handlers (high-level):
+
+- `APILogger` — central API logging utility that inserts `API_Log__c` records for all HTTP callouts (stores endpoint, request, response body, status).
+
+- `ExceptionLogger` — centralized exception logging. Supports creating in-memory instances and batched insert pattern so logs are inserted outside of tight loops.
+
+- `UserDetailsService` — performs `HttpRequest` callouts and returns parsed DTOs. Uses `APILogger` for response logging.
+
+- `OpportunitySubscriptionHandler` — trigger handler that creates `Subscription__c` records when Opportunities are marked Won. Uses partial DML and batched exception logging.
+
+- `SubscriptionController` — Apex @AuraEnabled controller used by LWC `subscriptionTable` to query subscriptions for an Account with server-side pagination and optional Status filter.
+
+- LWC `subscriptionTable` — Lightning Web Component showing `Subscription__c` records for an Account. Uses `@api recordId` (page context) and a `lightning-datatable` with pagination and status filtering.
+
+## Data Model (high-level)
+
+### Subscription__c (custom object)
+Fields & purpose:
+- `Name` (AutoNumber) — e.g., SUB01
+- `Opportunity__c` (Lookup[Opportunity]) — reference to originating Opportunity
+- `Opportunity_Name__c` (Text) — denormalized Opportunity name for display
+- `Start_Date__c` (Date) — typically Opportunity CloseDate
+- `End_Date__c` (Date) — Start_Date__c + 12 months (handler sets this)
+- `Amount__c` (Currency)
+- `Status__c` (Picklist) — Active / Inactive
+- `Sequence__c` (Number) — sequence index when multiple subscriptions created from a single Opportunity
+
+Notes:
+- `Account` is not stored on `Subscription__c` (derivable via `Opportunity__r.AccountId`)
+- Name numbering and Sequence__c ensure unique readable identifiers and ordering
 ```
 Field                  Type        Source
 ─────────────────────────────────────────────────
@@ -130,7 +105,16 @@ MailingPostalCode     String      location.postcode
 AccountId             Lookup      (linked to Account)
 ```
 
-### Account Object (created by batch)
+### API_Log__c (custom object)
+Fields & purpose:
+- `Timestamp__c` (DateTime)
+- `API_Endpoint__c` (Text)
+-  `Request_Body__c` (LongText)
+- `Response_Body__c` (LongText) — full raw JSON stored for audit
+- `Status__c` (Text/Picklist) — Success / Error
+- `Error_Message__c` (LongText) — parse or network error details
+
+Purpose: audit trail of all external HTTP callouts and responses. Populated by `APILogger`.
 ```
 Field                  Type        Value
 ─────────────────────────────────────────────────
@@ -145,7 +129,17 @@ Type                  Picklist    (not set)
 Industry              Picklist    (not set)
 ```
 
-### Logging Objects (standard)
+### Exception_Log__c (custom object)
+Fields & purpose:
+- `Timestamp__c` (DateTime)
+- `Source__c` (Text) — class/method that raised the exception
+- `Record_Id__c` (Text) — related record Id if applicable
+- `Exception_Type__c` (Text)
+- `Exception_Message__c` (LongText)
+- `Stack_Trace__c` (LongText)
+- `Context_Data__c` (LongText) — serialized context (e.g., input payload)
+
+Purpose: centralized error and exception capturing. `ExceptionLogger` supports pre-creating instances and batch inserting them to avoid DML inside loops.
 
 **API_Log__c**
 ```
@@ -172,7 +166,7 @@ Context_Data__c    String     Additional context
 Record_Id__c       String     Related record ID (if any)
 ```
 
-## Governor Limits Analysis
+## Runtime & Integration Notes
 
 ### Per Batch Execution
 ```
@@ -186,7 +180,7 @@ SOQL Queries                 1       100     ✓ Safe
 Records Processed            10      10,000  ✓ Safe
 ```
 
-## Error Handling Strategy
+## Error Handling Strategy (updated)
 
 ```
 ┌─ API Callout Errors
@@ -198,12 +192,12 @@ Records Processed            10      10,000  ✓ Safe
 ├─ Data Processing Errors
 │  ├─ Missing fields
 │  ├─ Type conversion errors
-│  └─ Action: Log to Exception_Log__c, continue processing
+│  └─ Action: Collect error details and create `Exception_Log__c` entries in-memory, then batch-insert after processing (no per-record DML inside loops)
 │
 ├─ DML Errors
 │  ├─ Required field missing
 │  ├─ Validation rule failure
-│  └─ Action: Log individual error, continue with next record
+│  └─ Action for Subscription creation: use `Database.insert(list, false)` to allow partial success; collect `Database.SaveResult` messages and convert to `Exception_Log__c` entries after DML
 │
 └─ System Errors
    ├─ Out of memory
@@ -211,7 +205,14 @@ Records Processed            10      10,000  ✓ Safe
    └─ Action: Log to Exception_Log__c
 ```
 
-## Security Considerations
+## LWC: `subscriptionTable` (UI details)
+
+- Placed on Account record page (Lightning App Builder). Component uses `@api recordId` to receive the Account Id from the page context.
+- Displays `Subscription__c` records related to the Account via `Opportunity__r.AccountId` (server-side query in `SubscriptionController`).
+- Uses `lightning-datatable` for columns: Name, Opportunity Name, Start Date, End Date, Amount (currency), Status, Sequence
+- Pagination: server-side, `perPage = 10` default, `page` navigation with Previous/Next; `pageInfo` shows current range and total
+- Filtering: Status combobox (All / Active / Inactive)
+- Error handling: `ShowToastEvent` used to surface Apex errors; component avoids requiring manual setup (`recordId` injected by platform)
 
 ### Data Access Control
 - `with sharing` keyword ensures user permissions are respected
@@ -227,7 +228,16 @@ Records Processed            10      10,000  ✓ Safe
 - Exception logs contain necessary context for debugging
 - API logs store full response for audit purposes
 
-## Performance Optimization
+## Metadata & Deployment Notes
+
+- Metadata reorganization: custom objects were migrated to Salesforce DX style with `*.object-meta.xml` files and individual field files under `objects/<ObjectName>/fields/*.field-meta.xml`.
+- Legacy files with `.object` extension may still exist in the workspace and should be removed before deployment to avoid duplicate metadata errors.
+- Several Apex class meta files updated: `APILogger.cls-meta.xml`, `ExceptionLogger.cls-meta.xml`, `SubscriptionController.cls-meta.xml` etc.
+
+Deployment checklist (updated):
+- Delete legacy `Subscription__c.object`, `Subscription__c-meta.xml`, `API_Log__c.object`, `API_Log__c-meta.xml`, `Exception_Log__c.object`, `Exception_Log__c-meta.xml` from the repo/workspace prior to SFDX deploy (cannot be safely deployed as duplicates).
+- Run `sfdx force:source:deploy -p force-app/main/default` (or use VS Code SFDX commands) and inspect compile errors.
+- Ensure test classes exist for callouts (HttpCalloutMock) and for `OpportunitySubscriptionHandler`.
 
 ### Database Optimization
 ```apex
@@ -288,9 +298,15 @@ System.schedule('Daily Random Users', '0 0 2 * * ?', new CustomerDetailsQueuable
 ✓ Other records successfully created
 ```
 
-## Testing Strategy
+## Testing Strategy (next steps)
 
-### Unit Tests (in RandomUserBatchTest.cls)
+Planned/Needed tests:
+- Add `HttpCalloutMock`-based tests for `UserDetailsService` to verify APILogger integration and response parsing.
+- Add unit tests for `OpportunitySubscriptionHandler` to validate:
+   - Correct number of `Subscription__c` records created for various `Add_subscriptions__c` values
+   - `Sequence__c` ordering
+   - Partial DML behavior and creation of `Exception_Log__c` entries on failures
+- Add tests verifying `ExceptionLogger` batch-create pattern and that no DML occurs inside loops.
 ```
 1. MockHttpResponse - Simulates API responses
 2. Test 1: Basic execution flow
@@ -313,19 +329,14 @@ System.schedule('Daily Random Users', '0 0 2 * * ?', new CustomerDetailsQueuable
 5. Verify address data accuracy
 ```
 
-## Deployment Checklist
+## Deployment Checklist (summary)
 
-- [ ] Verify Contact object has required fields
-- [ ] Verify Account object has required fields
-- [ ] Verify API_Log__c custom object exists
-- [ ] Verify Exception_Log__c custom object exists
-- [ ] Deploy RandomUserBatch.cls
-- [ ] Deploy RandomUserBatchUtil.cls
-- [ ] Deploy RandomUserBatchTest.cls
-- [ ] Run test class (expect 100% pass rate)
-- [ ] Create/schedule batch execution job
-- [ ] Monitor first execution for errors
-- [ ] Set up alerts for batch failures
+- [ ] Verify Contact object has required fields (if RandomUser batch is used)
+- [ ] Verify `API_Log__c`, `Exception_Log__c`, and `Subscription__c` custom objects exist (use DX metadata)
+- [ ] Remove legacy `.object` metadata files from the repo before deploy
+- [ ] Deploy all Apex classes and LWC (`subscriptionTable`) via SFDX or CI pipeline
+- [ ] Run unit tests (include callout mocks) and reach required coverage
+- [ ] Validate component on Account record page and test `recordId` context
 
 ## Maintenance & Monitoring
 
@@ -353,5 +364,5 @@ Monthly:
 
 ---
 
-**Last Updated:** November 14, 2025
-**Version:** 1.0
+**Last Updated:** November 17, 2025
+**Version:** 1.1
