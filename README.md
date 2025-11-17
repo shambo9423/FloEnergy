@@ -1,195 +1,59 @@
-# Random User Batch Implementation
+# Random User Integration (Queueable)
 
 ## Overview
-This solution fetches user details from the Random User API (https://randomuser.me/api?results=10) and automatically creates corresponding records in Salesforce:
-- **Contact records** store user personal information (name, email, phone, address)
-- **Account records** store household/address information with the naming convention: `{FirstName} {LastName} Household`
+This repository implements an asynchronous integration that fetches user details from a Random User-style API and creates corresponding Salesforce records (Account + Contact). The actual implementation uses a Queueable (`CustomerDetailsQueuable`) rather than a Batchable class. The controller and tests live under `force-app/main/default/classes` and the LWC table controller is in `force-app/main/default/lwc`.
 
-## Files Created
+Key behaviors:
+- Fetches user JSON from an API endpoint configured in custom metadata (`UserDetailsAPI_Config__mdt`)
+- Maps API payload to Contact and Account SObjects
+- Inserts Accounts first (partial success DML), then Contacts and maps AccountId using insert SaveResults
+- Logs API call details to `API_Log__c` and exceptions to `Exception_Log__c`
 
-### 1. **RandomUserBatch.cls**
-Main batch class implementing `Database.Batchable<Object>` and `Database.AllowsCallouts`
+## Important files
 
-**Key Features:**
-- Fetches 10 user records from Random User API in the `start()` method
-- Parses JSON response and creates Contact and Account records in the `execute()` method
-- Associates each Contact with its corresponding Account
-- Implements comprehensive error handling and logging
-- Supports configurable batch size
+- `force-app/main/default/classes/CustomerDetailsQueuable.cls` — Queueable implementation that performs the callout, parses payload, and creates Account + Contact records.
+- `force-app/main/default/classes/CustomerDetailsQueuableTest.cls` — Apex tests for the queueable (mocks callouts and asserts record creation).
+- `force-app/main/default/classes/ExceptionLogger.cls` and `ExceptionLoggerTest.cls` — Utilities and tests for logging exceptions to `Exception_Log__c`.
+- `force-app/main/default/classes/APILogger.cls` and `APILoggerTest.cls` — Logs API callouts to `API_Log__c`.
+- `force-app/main/default/classes/SubscriptionController.cls` — Apex controller used by an LWC datatable (`subscriptionTable`), including helper functions and comments.
+- `force-app/main/default/lwc/subscriptionTable/` — Lightning Web Component used by the UI (columns, pagination, pageInfo fix for zero rows).
+- `scripts/apex/randomuser_batch_execution.apex` — Example Execute Anonymous scripts to run and verify the integration.
 
-**Methods:**
-- `CustomerDetailsQueuable()` - Constructor with default batch size 
-- `start(Database.BatchableContext bc)` - Fetches data from API
-- `execute(Database.BatchableContext bc, List<Object> scope)` - Creates records
-- `finish(Database.BatchableContext bc)` - Finalizes batch execution
+## Execution
 
-### 2. **CustomerDetailsQueuableTest.cls**
-Comprehensive test class with 80% code coverage
+This integration is implemented as a Queueable. Use Execute Anonymous or an Apex schedulable to run it.
 
-
-
-## Data Mapping
-
-### Contact Record Fields
-| Contact Field | API Source |
-|---|---|
-| FirstName | name.first |
-| LastName | name.last |
-| Email | email |
-| Phone | phone |
-| MobilePhone | cell |
-| MailingStreet | location.street.number + location.street.name |
-| MailingCity | location.city |
-| MailingState | location.state |
-| MailingCountry | location.country |
-| MailingPostalCode | location.postcode |
-
-### Account Record Fields
-| Account Field | Source |
-|---|---|
-| Name | `{FirstName} {LastName} Household` |
-| BillingStreet | location.street.number + location.street.name |
-| BillingCity | location.city |
-| BillingState | location.state |
-| BillingCountry | location.country |
-| BillingPostalCode | location.postcode |
-| Phone | phone |
-
-## Execution Methods
-
-### Method 1: Execute Anonymous
+Example: enqueue the Queueable
 ```apex
-// Execute with default batch size (10)
-Id jobId = RandomUserBatchUtil.executeBatch();
-System.debug('Batch Job ID: ' + jobId);
+// Simple enqueue
+System.enqueueJob(new CustomerDetailsQueuable());
 
-// Execute with custom batch size
-Id jobId = RandomUserBatchUtil.executeBatch(5);
-System.debug('Batch Job ID: ' + jobId);
+// In tests (use Test.setMock for callouts):
+Test.startTest();
+System.enqueueJob(new CustomerDetailsQueuable());
+Test.stopTest();
 ```
 
-### Method 2: Direct Batch Execution
-```apex
-RandomUserBatch batch = new RandomUserBatch(10);
-Id jobId = Database.executeBatch(batch);
-```
+If you prefer a scheduled job, create a small Schedulable class that enqueues the job and schedule it via `System.schedule`.
 
-### Method 3: Schedule for Recurring Execution
-Create a schedulable class:
-```apex
-public class RandomUserBatchSchedulable implements Schedulable {
-    public void execute(SchedulableContext ctx) {
-        RandomUserBatchUtil.executeBatch(10);
-    }
-}
-```
+## Configuration
 
-Then schedule it:
-```apex
-// Run at 2 AM daily
-System.schedule('Random User Batch Daily', '0 0 2 * * ?', new RandomUserBatchSchedulable());
-```
+- Custom metadata `UserDetailsAPI_Config__mdt` (DeveloperName = `GetUserDetailsAPI`) must be present in the org. It contains the API endpoint, HTTP method, and timeout used by the Queueable.
+- Table configuration metadata `TableConfig__mdt` drives the `SubscriptionController` behavior in the LWC.
 
-## Error Handling & Logging
 
-The implementation includes robust error handling:
+Or run individual tests from the Salesforce Extensions for VS Code: right-click a test class and select "Run Test".
 
-1. **API Errors** - Logged to `API_Log__c` object
-   - Non-200 HTTP status codes
-   - Missing or empty results array
-   - JSON parsing errors
-
-2. **Processing Errors** - Logged to `Exception_Log__c` object
-   - Individual user processing failures
-   - Contact insert failures
-   - Account insert failures
-   - Account association failures
-
-3. **DML Operations** - All database operations use `Database.insert(list, false)` to continue on errors
-
-## API Endpoint Details
-
-**URL:** `https://randomuser.me/api?results=10`
-
-**Method:** GET
-
-**Response Format:**
-```json
-{
-  "results": [
-    {
-      "gender": "...",
-      "name": { "title": "...", "first": "...", "last": "..." },
-      "location": {
-        "street": { "number": 123, "name": "Street Name" },
-        "city": "...",
-        "state": "...",
-        "country": "...",
-        "postcode": 12345
-      },
-      "email": "...",
-      "phone": "...",
-      "cell": "...",
-      ...
-    }
-  ],
-  "info": { "seed": "...", "results": 10, "page": 1, "version": "1.4" }
-}
-```
-
-## Testing
-
-Run tests using Apex Test Execution:
-```apex
-// Run specific test class
-Test.runRunnable(new RandomUserBatchTest());
-
-// Or use VS Code Salesforce Extensions
-// Right-click on test class and select "Run Test"
-```
-
-## Batch Job Limits
-
-- **Heap Size:** ~6 MB per batch execution
-- **API Callouts:** 100 per transaction (only 1 used in start method)
-- **DML Statements:** 150 per transaction
-- **Records Per Batch:** Default 10, configurable up to 2000
-
-## Important Notes
-
-1. **API Callout in Start Method:** The callout is made in the `start()` method, which is executed once per batch job. This fetches the data that will be processed.
-
-2. **Contact-Account Relationship:** Accounts are inserted first, then Contacts are queried to link them. This ensures proper record association.
-
-3. **Duplicate Prevention:** The batch does not prevent duplicate Contacts/Accounts. Consider adding duplicate detection rules if needed.
-
-4. **Error Tolerance:** The batch continues processing even if individual records fail. Check `Exception_Log__c` for detailed error information.
-
-5. **Governor Limits:** Each batch execution respects Salesforce governor limits. Monitor logs for limit issues.
+Note: Some tests rely on custom metadata being present in the target org. If tests fail due to missing metadata, deploy the corresponding `force-app/main/default/customMetadata` files first.
 
 ## Troubleshooting
 
-### Batch Not Executing
-- Check that the organization allows API callouts
-- Verify the Random User API is accessible and returning data
+- Contacts or Accounts not created: Inspect `Exception_Log__c` and `API_Log__c` records via SOQL.
+- Callouts failing: Ensure the API endpoint configured in `UserDetailsAPI_Config__mdt` is reachable from the org and that Named Credentials / CSP settings allow the callout.
+- Tests failing due to validation rules: Update test data to satisfy org-specific validation rules (phone format, required fields), or adapt tests accordingly.
 
-### Contacts Created But No Accounts
-- Check `Exception_Log__c` for Account creation failures
-- Verify Account insert permissions
+## Notes & Future Work
 
-### Contacts Not Linked to Accounts
-- Verify the account name matching logic (First Name + Last Name + " Household")
-- Check if queries in execute method are finding the created accounts
+- The code uses partial-success DML (`Database.insert(list, false)`) to tolerate individual record failures and log them for inspection.
+- Consider adding deduplication, configurable field mappings, and a robust retry mechanism for transient API failures.
 
-### API Logs with Errors
-- Check `API_Log__c` for detailed error messages from Random User API
-- Verify network connectivity and API endpoint URL
-
-## Future Enhancements
-
-1. Add deduplication logic to prevent duplicate records
-2. Implement batch retry logic for failed operations
-3. Add field mapping configuration
-4. Support for additional API parameters (results count, nationality filters)
-5. Schedule batch job from configuration records
-6. Add notifications upon batch completion
