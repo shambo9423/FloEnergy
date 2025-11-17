@@ -57,6 +57,11 @@
 2. Surface errors in `Exception_Log__c` for operators to review
 ```
 
+### Data Model
+
+![alt text](<image (4).png>)
+
+
 ## Class Hierarchy & Dependencies (summary)
 
 Key Apex classes and handlers (high-level):
