@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomMetadata xmlns="http://soap.sforce.com/2006/04/metadata" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <label>SubscriptionTable</label>
+    <protected>false</protected>
+    <values>
+        <field>BaseQuery__c</field>
+        <value xsi:type="xsd:string">SELECT Id, Name, Opportunity_Name__c, Start_Date__c, End_Date__c, Amount__c, Status__c FROM Subscription__c</value>
+    </values>
+    <values>
+        <field>Columns__c</field>
+        <value xsi:type="xsd:string">[
+  {
+    &quot;label&quot;: &quot;Name&quot;,
+    &quot;fieldName&quot;: &quot;recordLink&quot;,
+    &quot;type&quot;: &quot;url&quot;,
+    &quot;typeAttributes&quot;: {
+      &quot;label&quot;: {
+        &quot;fieldName&quot;: &quot;Name&quot;
+      },
+      &quot;target&quot;: &quot;_self&quot;
+    }
+  },
+  {
+    &quot;label&quot;: &quot;Opportunity Name&quot;,
+    &quot;fieldName&quot;: &quot;Opportunity_Name__c&quot;,
+    &quot;type&quot;: &quot;text&quot;
+  },
+  {
+    &quot;label&quot;: &quot;Start Date&quot;,
+    &quot;fieldName&quot;: &quot;Start_Date__c&quot;,
+    &quot;type&quot;: &quot;date&quot;
+  },
+  {
+    &quot;label&quot;: &quot;End Date&quot;,
+    &quot;fieldName&quot;: &quot;End_Date__c&quot;,
+    &quot;type&quot;: &quot;date&quot;
+  },
+  {
+    &quot;label&quot;: &quot;Amount&quot;,
+    &quot;fieldName&quot;: &quot;Amount__c&quot;,
+    &quot;type&quot;: &quot;currency&quot;
+  },
+  {
+    &quot;label&quot;: &quot;Status&quot;,
+    &quot;fieldName&quot;: &quot;Status__c&quot;,
+    &quot;type&quot;: &quot;text&quot;
+  }
+]</value>
+    </values>
+    <values>
+        <field>ObjectApiName__c</field>
+        <value xsi:type="xsd:string">Subscription__c</value>
+    </values>
+    <values>
+        <field>Options__c</field>
+        <value xsi:type="xsd:string">[
+  {
+    &quot;label&quot;: &quot;All&quot;,
+    &quot;value&quot;: &quot;&quot;
+  },
+  {
+    &quot;label&quot;: &quot;Active&quot;,
+    &quot;value&quot;: &quot;Active&quot;
+  },
+  {
+    &quot;label&quot;: &quot;Inactive&quot;,
+    &quot;value&quot;: &quot;Inactive&quot;
+  }
+]</value>
+    </values>
+    <values>
+        <field>Per_Page_Size__c</field>
+        <value xsi:type="xsd:double">10.0</value>
+    </values>
+    <values>
+        <field>WhereConditions__c</field>
+        <value xsi:type="xsd:string">[
+  {
+    &quot;field&quot;: &quot;Opportunity__r.AccountId&quot;,
+    &quot;param&quot;: &quot;parentId&quot;
+  },
+  {
+    &quot;field&quot;: &quot;Status__c&quot;,
+    &quot;param&quot;: &quot;statusFilter&quot;
+  }
+]</value>
+    </values>
+</CustomMetadata>

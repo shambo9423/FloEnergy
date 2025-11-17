@@ -1,0 +1,69 @@
+<!--
+  @description       : Generic reusable datatable component driven by TableConfig__mdt
+  @author            : shambo.ray@gmail.com
+  @group             : 
+  @last modified on  : 11-15-2025
+  
+  This component displays subscription records related to an opportunity in a paginated table format.
+  It supports filtering by status and provides navigation controls for paging through results.
+-->
+<template>
+    <lightning-card title={tableHeader}>
+        <div class="slds-p-around_small">
+
+            <!-- Status filter combobox and refresh button -->
+            <div class="slds-m-bottom_medium">
+                <lightning-combobox 
+                    label={filterName} 
+                    value={statusFilter} 
+                    placeholder="All" 
+                    options={options} 
+                    onchange={handleStatusChange}>
+                </lightning-combobox>
+            </div>
+
+            <!-- Loading spinner during data fetch -->
+            <template if:true={isLoading}>
+                <lightning-spinner alternative-text="Loading"></lightning-spinner>
+            </template>
+
+            <!-- Data table when not loading -->
+            <template if:false={isLoading}>
+                <lightning-datatable
+                    key-field="Id"
+                    data={records}
+                    columns={columns}
+                    hide-checkbox-column="true"
+                    sortable-columns={columns}
+                ></lightning-datatable>
+            </template>
+
+            <!-- Pagination controls -->
+            <div class="slds-m-top_medium slds-border_top slds-p-top_medium">
+                <div class="slds-grid slds-gutters">
+                    <div class="slds-col slds-size_1-of-2">
+                        <lightning-button 
+                            variant="neutral" 
+                            label="Previous" 
+                            onclick={handlePrev} 
+                            disabled={isFirstPage} 
+                            class="slds-m-right_small">
+                        </lightning-button>
+                        <lightning-button 
+                            variant="neutral" 
+                            label="Next" 
+                            onclick={handleNext} 
+                            disabled={isLastPage}>
+                        </lightning-button>
+                    </div>
+                    <div class="slds-col slds-size_1-of-2 slds-text-align_right">
+                        <span class="slds-text-title_caps">{pageInfo}</span>
+                        <br/>
+                        <span class="slds-text-body_small">Page {page}</span>
+                    </div>
+                </div>
+            </div>
+            
+        </div>
+    </lightning-card>
+</template>
